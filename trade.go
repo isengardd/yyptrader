@@ -46,7 +46,7 @@ func yypInitParam() {
 	}
 	defer fi.Close()
 	fd, err := ioutil.ReadAll(fi)
-	fmt.Println(string(fd))
+	//fmt.Println(string(fd))
 	config_data, _ := simplejson.NewJson([]byte(fd))
 	sql_user, _ = config_data.Get("sql_user").String()
 	sql_pwd, _ = config_data.Get("sql_pwd").String()
@@ -465,7 +465,7 @@ func main() {
 		case <-t1.C:
 			if yypIsTradeTime() {
 				curPrice := queryRealTimePrice()
-				fmt.Println(curPrice)
+				//fmt.Println(curPrice)
 
 				//yypStrategy(curPrice, myOrder)
 
