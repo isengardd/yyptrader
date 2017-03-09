@@ -24,9 +24,9 @@ type QueryOrderDo struct {
 // 订单结构体
 type OrderData struct {
 	OrderId      string
-	BuyPrice     float32
+	BuyPrice     float32 //订单购买价
 	BuyDirection int
-	Price        int
+	Price        int //订单单位额度
 	Count        int
 	Contract     string
 	BuyTime      string //下单时间

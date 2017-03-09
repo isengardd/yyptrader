@@ -12,6 +12,7 @@ import (
 	"strings"
 	//"jasonstruct"
 	"compress/gzip"
+	"math"
 	"os"
 	"time"
 
@@ -161,9 +162,9 @@ func yypCreateOrder(iDirection int, buyPrice int, buyCount int) bool {
 		return false
 	}
 
-	requri := fmt.Sprintf("http://wp.100bei.com/nhpme/auth/order/createOrder.do?productId=46&type=%d&count=%d&useCoupon=0&couponCount=0&couponId=7&requestId=%s&toplimit=0&bottomlimit=0.5&moreCouponRule=0&contract=XAG1&price=%d&couponName=8%%E5%%85%%83&fee=0.6",
+	requri := fmt.Sprintf("http://wp.100bei.com/nhpme/auth/order/createOrder.do?productId=46&type=%d&count=%d&useCoupon=0&couponCount=0&couponId=7&requestId=%s&toplimit=0&bottomlimit=0.3&moreCouponRule=0&contract=XAG1&price=%d&couponName=8%%E5%%85%%83&fee=0.6",
 		iDirection, buyCount, rid, buyPrice)
-	fmt.Println(requri)
+	//fmt.Println(requri)
 	req, err := http.NewRequest("GET", requri, nil)
 
 	yypAddHeaderClient(&req.Header)
@@ -188,7 +189,7 @@ func yypCloseOrder(orderId string) bool {
 
 	requri := fmt.Sprintf("http://wp.100bei.com/nhpme/auth/order/closeOrder.do?orderId=%s&orderType=1&contract=XAG1&requestId=%s",
 		orderId, rid)
-	fmt.Println(requri)
+	//fmt.Println(requri)
 	req, err := http.NewRequest("GET", requri, nil)
 
 	yypAddHeaderClient(&req.Header)
@@ -227,7 +228,7 @@ func yypRequestBalance() float32 {
 		//fmt.Printf("%s\n", data)
 		var s ReceiveData
 		json.Unmarshal([]byte(data), &s)
-		fmt.Println(s)
+		//fmt.Println(s)
 
 		return s.Data.Balance
 	}
@@ -299,7 +300,7 @@ func yypGetRequestId() string {
 		//fmt.Printf("%s\n", data)
 		var s ReceiveData
 		json.Unmarshal([]byte(data), &s)
-		fmt.Println(s)
+		//fmt.Println(s)
 
 		return s.Data.RequestId
 	}
@@ -397,11 +398,30 @@ func yypInsertDataToDB(agPrice float32) {
 	}
 }
 
-func yypStrategy(curPrice float32, myOrder *OrderData) {
+func yypStrategy(curPrice float32, ppOrder **OrderData) {
 	//yypCreateOrder(BUY_DOWN, 8, 1)
 	//yypCloseOrder("28883497")
 	// 如果当前有订单
 	// else 当前没有订单
+	// todo 这里要考虑短期剧烈导致的强制平仓的情况
+
+	strTmpOrder := yypGetOrderId()
+	// 容错处理，防止出现订单状态不一致的情况
+	if strTmpOrder == "" && *ppOrder != nil {
+		*ppOrder = nil
+	} else if *ppOrder == nil && strTmpOrder != "" {
+		*ppOrder, _ = yypGetOrderDetail()
+		the_time, err := time.ParseInLocation("2006-01-02 15:04:05", (*ppOrder).BuyTime, time.Local)
+		if err == nil {
+			var nBuyTime uint = (uint)(the_time.Unix())
+			(*ppOrder).MaxPrice = yypGetPriceFromDate(nBuyTime, "MAX")
+			(*ppOrder).MinPrice = yypGetPriceFromDate(nBuyTime, "MIN")
+		} else {
+			fmt.Println(err)
+		}
+	}
+
+	var myOrder *OrderData = *ppOrder
 	if myOrder != nil {
 		if myOrder.MaxPrice < curPrice {
 			myOrder.MaxPrice = curPrice
@@ -409,22 +429,139 @@ func yypStrategy(curPrice float32, myOrder *OrderData) {
 		if myOrder.MinPrice > curPrice {
 			myOrder.MinPrice = curPrice
 		}
-	} else {
 
+		var bClosing bool = false
+		fMaxProfit := yypGetHistoryMaxProfit(myOrder)
+		fMaxProfitRate := (float32)(math.Abs((float64)(fMaxProfit))) / (float32)(myOrder.Price)
+		fCurProfit := yypGetCurProfit(curPrice, myOrder)
+		fCurProfitRate := (float32)(math.Abs((float64)(fCurProfit))) / (float32)(myOrder.Price)
+		fDiffRate := (float32)(math.Abs((float64)(fMaxProfit-fCurProfit))) / (float32)(myOrder.Price)
+		//亏损20 % 平仓
+		if fCurProfit < 0 && fCurProfitRate >= 0.20 {
+			bClosing = true
+		}
+
+		if !bClosing &&
+			fMaxProfit > 0 &&
+			fMaxProfitRate >= 0.10 &&
+			fMaxProfit > fCurProfit &&
+			fDiffRate > 0.20 {
+			bClosing = true
+		}
+
+		if bClosing {
+			yypCloseOrder(myOrder.OrderId)
+			fmt.Println(fmt.Sprintf("%s, Price: %f, Close", time.Now().Format("2006-01-02 15:04:05"), curPrice))
+			strTmpOrder := yypGetOrderId()
+			if strTmpOrder != "" {
+				fmt.Println("CloseOrderFail!")
+			} else {
+				// 清空订单信息
+				*ppOrder = nil
+			}
+		}
+	} else {
+		// 超过2日最高价，或者跌破2日最低价，开仓
+		var nTargetTime uint = yypGetTargetTimeStamp()
+		var fMax float32 = yypGetPriceFromDate(nTargetTime, "MAX")
+		var fMin float32 = yypGetPriceFromDate(nTargetTime, "MIN")
+		if (fMax - fMin) <= 30 {
+			return
+		}
+
+		var buy_type int = BUY_NONE
+		if curPrice >= fMax {
+			buy_type = BUY_UP
+		} else if curPrice <= fMin {
+			buy_type = BUY_DOWN
+		}
+
+		if buy_type == BUY_NONE {
+			return
+		}
+
+		if yypCanCreateOrder(AG_PRICE_8, 1) {
+			yypCreateOrder(buy_type, AG_PRICE_8, 1)
+			fmt.Println(fmt.Sprintf("%s, Price: %f, Buy", time.Now().Format("2006-01-02 15:04:05"), curPrice))
+			*ppOrder, _ = yypGetOrderDetail()
+			if *ppOrder != nil && (*ppOrder).OrderId != "" {
+				(*ppOrder).MaxPrice = (*ppOrder).BuyPrice
+				(*ppOrder).MinPrice = (*ppOrder).BuyPrice
+			}
+		}
 	}
 }
 
-func yypGetPriceFromDate(strDate string, bMax bool) float32 {
+func yypCanCreateOrder(price int, count int) bool {
+	// 最后确认一次是否没有该产品的订单
+	checkOrder, _ := yypGetOrderDetail()
+	if checkOrder != nil && checkOrder.OrderId != "" {
+		return false
+	}
+
+	// 总资金足够
+	myBalance := yypRequestBalance()
+	minMoney := ((float32)(price) + AG_FEE_8) * (float32)(count)
+	if myBalance < minMoney {
+		return false
+	}
+
+	return true
+}
+
+func yypGetTargetTimeStamp() uint {
+	// 周1和周2向前取4天，其他时间取2天
+	nowtime := time.Now()
+	if nowtime.Weekday() == time.Monday || nowtime.Weekday() == time.Tuesday {
+		return (uint)(nowtime.Unix() - ONE_DAY_SECOND*4)
+	}
+	return (uint)(nowtime.Unix() - ONE_DAY_SECOND*2)
+}
+
+func yypGetHistoryMaxProfit(myOrder *OrderData) float32 {
+	var priceWave float32 = yypGetUnitWavePrice(AG, myOrder.Price)
+
+	if myOrder.BuyDirection == BUY_UP {
+		return (myOrder.MaxPrice - myOrder.BuyPrice) * priceWave
+	} else if myOrder.BuyDirection == BUY_DOWN {
+		return (myOrder.BuyPrice - myOrder.MinPrice) * priceWave
+	} else {
+		return 0
+	}
+	return 0
+}
+
+func yypGetCurProfit(curPrice float32, myOrder *OrderData) float32 {
+	var priceWave float32 = yypGetUnitWavePrice(AG, myOrder.Price)
+	if myOrder.BuyDirection == BUY_UP {
+		return (curPrice - myOrder.BuyPrice) * priceWave
+	} else if myOrder.BuyDirection == BUY_DOWN {
+		return (myOrder.BuyPrice - curPrice) * priceWave
+	} else {
+		return 0
+	}
+	return 0
+}
+
+func yypGetUnitWavePrice(product int, price int) float32 {
+	if product == AG {
+		if price == AG_PRICE_8 {
+			return 0.1
+		}
+	}
+	return 0
+}
+
+func yypGetPriceFromDate(nTimeStamp uint, strFunc string) float32 {
 	if SQL_CONNECT == nil {
 		return 0
 	}
 
-	var funcSQL string = "MIN"
-	if bMax == true {
-		funcSQL = "MAX"
+	if strFunc != "MAX" && strFunc != "MIN" {
+		return 0
 	}
 
-	rows, err := SQL_CONNECT.Query(fmt.Sprintf("select %s(price) from price_ag_new WHERE log_time>\"%s\"", funcSQL, strDate))
+	rows, err := SQL_CONNECT.Query(fmt.Sprintf("select %s(price) from price_ag_new WHERE log_time>FROM_UNIXTIME(%d)", strFunc, nTimeStamp))
 	if err != nil {
 		fmt.Println(err)
 		return 0
@@ -451,12 +588,29 @@ func main() {
 	SQL_CONNECT = yypGetDB()
 	defer SQL_CONNECT.Close()
 
-	//	var num int = 0
-	//	myOrder, _ := yypGetOrderDetail()
-	//	if myOrder != nil && myOrder.OrderId != "" && myOrder.BuyTime != "" {
-	//		myOrder.MaxPrice = yypGetPriceFromDate(myOrder.BuyTime, true)
-	//		myOrder.MinPrice = yypGetPriceFromDate(myOrder.BuyTime, false)
+	var num int = 0
+	myOrder, _ := yypGetOrderDetail()
+	//	myOrder := &OrderData{
+	//		OrderId:      "1111",
+	//		BuyPrice:     3900,
+	//		BuyDirection: 1,
+	//		Price:        8,
+	//		Count:        1,
+	//		Contract:     "XAG1",
+	//		BuyTime:      "2017-03-03 12:00:00",
+	//		MaxPrice:     10,
+	//		MinPrice:     10,
 	//	}
+	if myOrder != nil && myOrder.OrderId != "" && myOrder.BuyTime != "" {
+		the_time, err := time.ParseInLocation("2006-01-02 15:04:05", myOrder.BuyTime, time.Local)
+		if err == nil {
+			var nBuyTime uint = (uint)(the_time.Unix())
+			myOrder.MaxPrice = yypGetPriceFromDate(nBuyTime, "MAX")
+			myOrder.MinPrice = yypGetPriceFromDate(nBuyTime, "MIN")
+		} else {
+			fmt.Println(err)
+		}
+	}
 
 	t1 := time.NewTimer(time.Millisecond * 500)
 
@@ -467,20 +621,17 @@ func main() {
 				curPrice := queryRealTimePrice()
 				//fmt.Println(curPrice)
 
-				//yypStrategy(curPrice, myOrder)
+				yypStrategy(curPrice, &myOrder)
 
 				yypInsertDataToDB(curPrice)
 			}
-			//			} else {
-			//				// 由于执行的是每日清仓原则，所以休市期清空所有的订单
-			//				myOrder = nil
-			//			}
-			//			num = num + 1
-			//			num = num % 5
-			//			if num == 0 {
-			//				// 5秒请求一次，用于保持session
-			//				yypGetOrderId()
-			//			}
+
+			num = num + 1
+			num = num % 5
+			if num == 0 {
+				// 5秒请求一次，用于保持session
+				yypGetOrderId()
+			}
 
 			t1.Reset(time.Millisecond * 1000)
 		}

@@ -1,0 +1,13 @@
+CREATE TABLE `price_ag_new` (
+   `log_time` datetime(1) NOT NULL,
+   `price` float NOT NULL DEFAULT '0',
+   PRIMARY KEY (`log_time`),
+   KEY `idx_price_ag_price` (`price`)
+ ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+
+CREATE TABLE `zc_param` (
+   `id` int(11) NOT NULL AUTO_INCREMENT,
+   `name` varchar(32) NOT NULL,
+   `val` varchar(256) NOT NULL,
+   PRIMARY KEY (`id`)
+ ) ENGINE=InnoDB AUTO_INCREMENT=7 DEFAULT CHARSET=utf8;
