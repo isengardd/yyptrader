@@ -86,7 +86,7 @@ func yypGetOrderId() int {
 }
 
 func yypIsTradeTime() bool {
-	// 每周一8:00 到 周六 4:00 每日 4:00到7:00休市
+	// 每周一8:00 到 周六 4:00 每日 4:00到6:00休市
 	nowtime := time.Now()
 	var nHour int
 	var nMin int
@@ -98,7 +98,7 @@ func yypIsTradeTime() bool {
 			return true
 		}
 	} else if nowtime.Weekday() == time.Monday {
-		if nTodaySec >= TRADE_END_END+3600 {
+		if nTodaySec >= TRADE_START_MONDAY {
 			return true
 		}
 	} else if nowtime.Weekday() == time.Saturday {

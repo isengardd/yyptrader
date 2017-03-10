@@ -15,7 +15,8 @@ const (
 var ONE_DAY_SECOND int64 = 86400
 
 var TRADE_END_BEGIN int = 4*3600 - 10
-var TRADE_END_END int = 7*3600 + 10
+var TRADE_END_END int = 6*3600 + 10
+var TRADE_START_MONDAY int = 8*3600 + 10
 
 // 手续费率
 var AG_FEE_8 float32 = 0.6
