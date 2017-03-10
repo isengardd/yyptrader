@@ -2,7 +2,7 @@ package main
 
 import (
 	"database/sql"
-	"encoding/json"
+	//"encoding/json"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -54,12 +54,12 @@ func yypInitParam() {
 	sql_port, _ = config_data.Get("sql_port").Int()
 }
 
-func yypGetOrderId() string {
+func yypGetOrderId() int {
 	//fmt.Println("yypGetOrderId")
 	/////////////////// request data persecond
 	req, err := http.NewRequest("GET", "http://wp.100bei.com/nhpme/auth/order/queryCurrentOrder.do", nil)
 	if err != nil {
-		return ""
+		return 0
 	}
 
 	yypAddHeaderClient(&req.Header)
@@ -67,20 +67,22 @@ func yypGetOrderId() string {
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		return ""
+		return 0
 	}
 
 	defer resp.Body.Close()
 
 	if data, err := ioutil.ReadAll(resp.Body); err == nil {
 		//fmt.Printf("%s\n", data)
-		var s QueryOrderDo
-		json.Unmarshal([]byte(data), &s)
-		//fmt.Println(s)
-
-		return s.Data
+		js_data, _ := simplejson.NewJson([]byte(data))
+		requestId, js_err := js_data.Get("data").GetIndex(0).Int()
+		if js_err != nil {
+			//fmt.Println(js_err)
+			return 0
+		}
+		return requestId
 	}
-	return ""
+	return 0
 }
 
 func yypIsTradeTime() bool {
@@ -162,7 +164,7 @@ func yypCreateOrder(iDirection int, buyPrice int, buyCount int) bool {
 		return false
 	}
 
-	requri := fmt.Sprintf("http://wp.100bei.com/nhpme/auth/order/createOrder.do?productId=46&type=%d&count=%d&useCoupon=0&couponCount=0&couponId=7&requestId=%s&toplimit=0&bottomlimit=0.3&moreCouponRule=0&contract=XAG1&price=%d&couponName=8%%E5%%85%%83&fee=0.6",
+	requri := fmt.Sprintf("http://wp.100bei.com/nhpme/auth/order/createOrder.do?productId=46&type=%d&count=%d&useCoupon=0&couponCount=0&couponId=7&requestId=%s&toplimit=0&bottomlimit=0.3&moreCouponRule=0&contract=HGAG&price=%d&couponName=8%%E5%%85%%83&fee=0.6",
 		iDirection, buyCount, rid, buyPrice)
 	//fmt.Println(requri)
 	req, err := http.NewRequest("GET", requri, nil)
@@ -181,13 +183,13 @@ func yypCreateOrder(iDirection int, buyPrice int, buyCount int) bool {
 	return true
 }
 
-func yypCloseOrder(orderId string) bool {
+func yypCloseOrder(orderId int) bool {
 	rid := yypGetRequestId()
 	if rid == "" {
 		return false
 	}
 
-	requri := fmt.Sprintf("http://wp.100bei.com/nhpme/auth/order/closeOrder.do?orderId=%s&orderType=1&contract=XAG1&requestId=%s",
+	requri := fmt.Sprintf("http://wp.100bei.com/nhpme/auth/order/closeOrder.do?orderId=%d&orderType=1&contract=HGAG&requestId=%s",
 		orderId, rid)
 	//fmt.Println(requri)
 	req, err := http.NewRequest("GET", requri, nil)
@@ -226,11 +228,15 @@ func yypRequestBalance() float32 {
 
 	if data, err := ioutil.ReadAll(resp.Body); err == nil {
 		//fmt.Printf("%s\n", data)
-		var s ReceiveData
-		json.Unmarshal([]byte(data), &s)
-		//fmt.Println(s)
 
-		return s.Data.Balance
+		js_data, _ := simplejson.NewJson([]byte(data))
+		//fmt.Println(js_data)
+		my_balance, js_err := js_data.Get("data").Get("balance").Float64()
+		if js_err == nil {
+			//fmt.Println(str_real_Price)
+			return (float32)(my_balance)
+		}
+		return 0.0
 	}
 
 	return 0.0
@@ -257,17 +263,59 @@ func yypGetOrderDetail() (*OrderData, error) {
 	if data, err := ioutil.ReadAll(resp.Body); err == nil {
 		//fmt.Printf("%s\n", data)
 
-		var s ReceiveData
-		json.Unmarshal([]byte(data), &s)
-		//fmt.Println(s)
+		js_data, _ := simplejson.NewJson([]byte(data))
+		//fmt.Println(js_data)
+		var js_err error
+		var buyDir int
+		var buyPrice float64
+		var orderId int
+		var price int
+		var count int
+		var contract string
+		var buyTime string
+		buyDir, js_err = js_data.Get("data").GetIndex(0).Get("buyDirection").Int()
+		if js_err != nil {
+			fmt.Println(js_err)
+			return nil, js_err
+		}
+		buyPrice, js_err = js_data.Get("data").GetIndex(0).Get("buyPrice").Float64()
+		if js_err != nil {
+			fmt.Println(js_err)
+			return nil, js_err
+		}
+		orderId, js_err = js_data.Get("data").GetIndex(0).Get("orderId").Int()
+		if js_err != nil {
+			fmt.Println(js_err)
+			return nil, js_err
+		}
+		price, js_err = js_data.Get("data").GetIndex(0).Get("price").Int()
+		if js_err != nil {
+			fmt.Println(js_err)
+			return nil, js_err
+		}
+		count, js_err = js_data.Get("data").GetIndex(0).Get("count").Int()
+		if js_err != nil {
+			fmt.Println(js_err)
+			return nil, js_err
+		}
+		contract, js_err = js_data.Get("data").GetIndex(0).Get("contract").String()
+		if js_err != nil {
+			fmt.Println(js_err)
+			return nil, js_err
+		}
+		buyTime, js_err = js_data.Get("data").GetIndex(0).Get("addTime").String()
+		if js_err != nil {
+			fmt.Println(js_err)
+			return nil, js_err
+		}
 		myOrder := &OrderData{
-			OrderId:      s.Data.OrderId,
-			BuyPrice:     s.Data.BuyPrice,
-			BuyDirection: s.Data.BuyDirection,
-			Price:        s.Data.Price,
-			Count:        s.Data.Count,
-			Contract:     s.Data.Contract,
-			BuyTime:      s.Data.AddTime,
+			OrderId:      orderId,
+			BuyPrice:     (float32)(buyPrice),
+			BuyDirection: buyDir,
+			Price:        price,
+			Count:        count,
+			Contract:     contract,
+			BuyTime:      buyTime,
 			MaxPrice:     0,
 			MinPrice:     0,
 		}
@@ -298,11 +346,13 @@ func yypGetRequestId() string {
 
 	if data, err := ioutil.ReadAll(resp.Body); err == nil {
 		//fmt.Printf("%s\n", data)
-		var s ReceiveData
-		json.Unmarshal([]byte(data), &s)
-		//fmt.Println(s)
-
-		return s.Data.RequestId
+		js_data, _ := simplejson.NewJson([]byte(data))
+		requestId, js_err := js_data.Get("data").Get("requestId").String()
+		if js_err != nil {
+			fmt.Println(js_err)
+			return ""
+		}
+		return requestId
 	}
 
 	return ""
@@ -405,12 +455,16 @@ func yypStrategy(curPrice float32, ppOrder **OrderData) {
 	// else 当前没有订单
 	// todo 这里要考虑短期剧烈导致的强制平仓的情况
 
-	strTmpOrder := yypGetOrderId()
+	nTmpOrder := yypGetOrderId()
 	// 容错处理，防止出现订单状态不一致的情况
-	if strTmpOrder == "" && *ppOrder != nil {
+	if nTmpOrder == 0 && *ppOrder != nil {
 		*ppOrder = nil
-	} else if *ppOrder == nil && strTmpOrder != "" {
+	} else if *ppOrder == nil && nTmpOrder != 0 {
 		*ppOrder, _ = yypGetOrderDetail()
+		if *ppOrder == nil {
+			fmt.Println("yypStrategy getorderdatail failed")
+			return
+		}
 		the_time, err := time.ParseInLocation("2006-01-02 15:04:05", (*ppOrder).BuyTime, time.Local)
 		if err == nil {
 			var nBuyTime uint = (uint)(the_time.Unix())
@@ -445,15 +499,15 @@ func yypStrategy(curPrice float32, ppOrder **OrderData) {
 			fMaxProfit > 0 &&
 			fMaxProfitRate >= 0.10 &&
 			fMaxProfit > fCurProfit &&
-			fDiffRate > 0.20 {
+			fDiffRate > 0.15 {
 			bClosing = true
 		}
 
 		if bClosing {
 			yypCloseOrder(myOrder.OrderId)
 			fmt.Println(fmt.Sprintf("%s, Price: %f, Close", time.Now().Format("2006-01-02 15:04:05"), curPrice))
-			strTmpOrder := yypGetOrderId()
-			if strTmpOrder != "" {
+			nTmpOrder := yypGetOrderId()
+			if nTmpOrder != 0 {
 				fmt.Println("CloseOrderFail!")
 			} else {
 				// 清空订单信息
@@ -484,7 +538,7 @@ func yypStrategy(curPrice float32, ppOrder **OrderData) {
 			yypCreateOrder(buy_type, AG_PRICE_8, 1)
 			fmt.Println(fmt.Sprintf("%s, Price: %f, Buy", time.Now().Format("2006-01-02 15:04:05"), curPrice))
 			*ppOrder, _ = yypGetOrderDetail()
-			if *ppOrder != nil && (*ppOrder).OrderId != "" {
+			if *ppOrder != nil && (*ppOrder).OrderId != 0 {
 				(*ppOrder).MaxPrice = (*ppOrder).BuyPrice
 				(*ppOrder).MinPrice = (*ppOrder).BuyPrice
 			}
@@ -495,7 +549,7 @@ func yypStrategy(curPrice float32, ppOrder **OrderData) {
 func yypCanCreateOrder(price int, count int) bool {
 	// 最后确认一次是否没有该产品的订单
 	checkOrder, _ := yypGetOrderDetail()
-	if checkOrder != nil && checkOrder.OrderId != "" {
+	if checkOrder != nil && checkOrder.OrderId != 0 {
 		return false
 	}
 
@@ -601,7 +655,7 @@ func main() {
 	//		MaxPrice:     10,
 	//		MinPrice:     10,
 	//	}
-	if myOrder != nil && myOrder.OrderId != "" && myOrder.BuyTime != "" {
+	if myOrder != nil && myOrder.OrderId != 0 && myOrder.BuyTime != "" {
 		the_time, err := time.ParseInLocation("2006-01-02 15:04:05", myOrder.BuyTime, time.Local)
 		if err == nil {
 			var nBuyTime uint = (uint)(the_time.Unix())
