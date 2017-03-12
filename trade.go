@@ -55,6 +55,11 @@ func yypInitParam() {
 }
 
 func yypGetOrderId() int {
+	defer func() {
+		if v := recover(); v != nil {
+			fmt.Println("yypGetOrderId panic")
+		}
+	}()
 	//fmt.Println("yypGetOrderId")
 	/////////////////// request data persecond
 	req, err := http.NewRequest("GET", "http://wp.100bei.com/nhpme/auth/order/queryCurrentOrder.do", nil)
@@ -74,13 +79,28 @@ func yypGetOrderId() int {
 
 	if data, err := ioutil.ReadAll(resp.Body); err == nil {
 		//fmt.Printf("%s\n", data)
-		js_data, _ := simplejson.NewJson([]byte(data))
-		requestId, js_err := js_data.Get("data").GetIndex(0).Int()
-		if js_err != nil {
-			//fmt.Println(js_err)
+		js_data, js_err1 := simplejson.NewJson([]byte(data))
+		if js_data != nil {
+			mapData := js_data.Get("data")
+			if mapData == nil {
+				fmt.Println("yypGetOrderId data is nil")
+				return 0
+			}
+
+			if arrayData, _ := mapData.Array(); arrayData == nil || len(arrayData) == 0 {
+				return 0
+			}
+
+			requestId, js_err := mapData.GetIndex(0).Int()
+			if js_err != nil {
+				fmt.Println(js_err)
+				return 0
+			}
+			return requestId
+		} else {
+			fmt.Println(js_err1)
 			return 0
 		}
-		return requestId
 	}
 	return 0
 }
@@ -243,6 +263,12 @@ func yypRequestBalance() float32 {
 }
 
 func yypGetOrderDetail() (*OrderData, error) {
+	defer func() {
+		if v := recover(); v != nil {
+			fmt.Println("yypGetOrderDetail panic")
+		}
+	}()
+
 	req, err := http.NewRequest("GET", "http://wp.100bei.com/nhpme/auth/order/currentOrder.do?queryDb=1", nil)
 	if err != nil {
 		fmt.Println(err)
@@ -264,7 +290,21 @@ func yypGetOrderDetail() (*OrderData, error) {
 		//fmt.Printf("%s\n", data)
 
 		js_data, _ := simplejson.NewJson([]byte(data))
+		if js_data == nil {
+			fmt.Println("yypGetOrderDetail byte is nil")
+			return nil, nil
+		}
 		//fmt.Println(js_data)
+		mapData := js_data.Get("data")
+		if mapData == nil {
+			fmt.Println("yypGetOrderDetail data is nil")
+			return nil, nil
+		}
+
+		if arrayData, _ := mapData.Array(); arrayData == nil || len(arrayData) == 0 {
+			return nil, nil
+		}
+
 		var js_err error
 		var buyDir int
 		var buyPrice float64
