@@ -494,6 +494,9 @@ func yypStrategy(curPrice float32, ppOrder **OrderData) {
 	// 如果当前有订单
 	// else 当前没有订单
 	// todo 这里要考虑短期剧烈导致的强制平仓的情况
+	if curPrice == 0 {
+		return
+	}
 
 	nTmpOrder := yypGetOrderId()
 	// 容错处理，防止出现订单状态不一致的情况
